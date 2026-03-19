@@ -208,19 +208,17 @@ def aplicar_estilos():
             background-color: {Config.BACKGROUND_DARK};
         }}
 
-        /* Contenedor principal */
-        .main .block-container {{
-            background-color: rgba(10, 12, 16, 0.85);
-            backdrop-filter: blur(10px);
-            border-radius: 20px;
-            padding-bottom: 100px !important;
-            margin: 1rem auto 0 auto !important;
-            border: 1px solid {Config.PRIMARY_COLOR};
-            box-shadow: 0 0 30px rgba(0, 255, 255, 0.2);
-            max-width: 1000px !important;
-            min-height: calc(100vh - 120px);
-            margin-bottom: 0 !important;
-        }}
+        /* Contenedor principal ajustado */
+.main .block-container {{
+    background-color: rgba(10, 12, 16, 0.85);
+    backdrop-filter: blur(10px);
+    border-radius: 20px;
+    padding-bottom: 2rem !important; /* Reducido de 100px a 2rem */
+    margin: 1rem auto !important;
+    border: 1px solid {Config.PRIMARY_COLOR};
+    box-shadow: 0 0 30px rgba(0, 255, 255, 0.2);
+    max-width: 1000px !important;
+}}
 
         /* Títulos */
         h1 {{
@@ -347,23 +345,23 @@ def aplicar_estilos():
             font-style: italic;
         }}
 
-        /* ===== BARRA DE ESCRITURA FIJA EN LA PARTE INFERIOR ===== */
-        .stChatInputContainer {{
-            position: fixed !important;
-            bottom: 20px !important;
-            left: 50% !important;
-            transform: translateX(-50%) !important;
-            width: 700px !important;
-            max-width: 90% !important;
-            z-index: 1000 !important;
-            background: rgba(10, 12, 16, 0.95) !important;
-            backdrop-filter: blur(12px) !important;
-            border: 2px solid {Config.PRIMARY_COLOR} !important;
-            border-radius: 50px !important;
-            padding: 5px 5px 5px 20px !important;
-            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5), 0 0 20px rgba(0, 255, 255, 0.2) !important;
-            transition: all 0.3s ease !important;
-        }}
+        /* ===== BARRA DE ESCRITURA DESPUÉS DE LAS RESPUESTAS ===== */
+.stChatInputContainer {{
+    position: relative !important; /* Cambiado de fixed a relative */
+    bottom: 0 !important;
+    left: 0 !important;
+    transform: none !important;
+    width: 100% !important; /* Ocupa el ancho del contenedor */
+    max-width: 100% !important;
+    z-index: 1000 !important;
+    background: rgba(10, 12, 16, 0.95) !important;
+    backdrop-filter: blur(12px) !important;
+    border: 2px solid {Config.PRIMARY_COLOR} !important;
+    border-radius: 15px !important; /* Ajustado para que no sea tan ovalado */
+    padding: 5px !important;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5) !important;
+    margin-top: 20px !important; /* Espacio respecto a la última respuesta */
+}}
 
         .stChatInputContainer:hover {{
             box-shadow: 0 15px 50px rgba(0, 0, 0, 0.6), 0 0 30px rgba(0, 255, 255, 0.3) !important;
@@ -404,9 +402,7 @@ def aplicar_estilos():
             box-shadow: 0 6px 20px rgba(0, 255, 255, 0.3) !important;
         }}
 
-        .stChatMessage:last-of-type {{
-            margin-bottom: 100px !important;
-        }}
+        
 
         .imagen-generada {{
             background: linear-gradient(145deg, {Config.CARD_BACKGROUND}, #15232e);
