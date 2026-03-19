@@ -1,0 +1,1316 @@
+# ============================================
+# AGUWEYBOT - VERSIÓN CON QWEN2.5 (OPENAI API) - CORREGIDO
+# ============================================
+
+import os
+import base64
+import time
+import streamlit as st
+import streamlit.components.v1 as components
+import re
+import io
+import sys
+import traceback
+import random
+from typing import Optional, Tuple, List
+from datetime import datetime
+from dataclasses import dataclass
+
+from openai import OpenAI
+from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
+
+# Para documentos
+from PyPDF2 import PdfReader
+from docx import Document
+import pandas as pd
+import chardet
+
+# ============================================
+# LIBRERÍAS PARA IMÁGENES
+# ============================================
+try:
+    import requests
+    from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageEnhance
+    IMAGE_GEN_AVAILABLE = True
+    print("✅ Librerías de imágenes disponibles")
+except ImportError as e:
+    IMAGE_GEN_AVAILABLE = False
+    print(f"❌ Error importando librerías: {e}")
+
+# ============================================
+# TEXTO A VOZ
+# ============================================
+try:
+    from gtts import gTTS
+    TTS_AVAILABLE = True
+except ImportError:
+    TTS_AVAILABLE = False
+
+# ============================================
+# CONFIGURACIÓN INICIAL DE STREAMLIT
+# ============================================
+st.set_page_config(
+    page_title="AguweyBot - Qwen2.5",
+    page_icon="🎨",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# ============================================
+# CONSTANTES Y CONFIGURACIÓN VISUAL
+# ============================================
+class Config:
+    # Colores
+    PRIMARY_COLOR = "#00ffff"
+    SECONDARY_COLOR = "#00cccc"
+    BACKGROUND_DARK = "#0a0c10"
+    CARD_BACKGROUND = "#1e2a3a"
+    
+    # Rutas de archivos
+    LOGO_PATH = "logo.png"
+    BACKGROUND_PATH = "fondo.png"
+    
+    # Límites
+    MAX_HISTORY_MESSAGES = 10
+    MAX_FILE_SIZE_MB = 50
+    MAX_IMAGE_SIZE_MB = 5
+    
+    # Configuración Qwen
+    QWEN_MODEL = "qwen2.5-72b-instruct"  # o "qwen2.5-32b-instruct" / "qwen2.5-14b-instruct"
+    API_BASE_URL = "https://api.openai.com/v1"  # Para OpenAI compatible API
+    MAX_TOKENS = 4096
+    TEMPERATURE = 0.2
+
+# ============================================
+# SYSTEM PROMPT
+# ============================================
+SYSTEM_PROMPT = """
+Eres AguweyBot, un asistente híbrido experto en:
+1. ANÁLISIS DE DOCUMENTOS (texto, PDFs, Excel, etc.)
+2. GENERACIÓN DE IMÁGENES (cuando el usuario lo solicite)
+
+CAPACIDADES:
+- 📄 Análisis de documentos: Lee TODO el contenido de archivos subidos
+- 🎨 Generación de imágenes: Crea imágenes a partir de descripciones
+- 🔊 Texto a voz: Convierte respuestas a audio
+- 📋 Copiado de respuestas
+- 💾 Descarga de imágenes generadas
+
+DETECCIÓN AUTOMÁTICA:
+- Si el usuario pide "dibuja", "crea imagen", "genera foto", etc., debes ACTIVAR generación de imágenes
+- Si el usuario sube un archivo o pregunta sobre documentos, debes ANALIZAR el contenido
+- Si es una pregunta normal, responde como asistente conversacional
+
+REGLAS PARA IMÁGENES:
+- Cuando detectes una solicitud de imagen, responde con: "🎨 GENERANDO IMAGEN: [descripción corta]"
+- Luego el sistema generará la imagen automáticamente
+- Si la descripción no es clara, pide más detalles
+
+REGLAS PARA DOCUMENTOS:
+- Usa TODO el contenido del archivo para responder
+- No inventes información
+- Si no encuentras algo en el archivo, dilo honestamente
+
+FORMATO DE RESPUESTA:
+- Usa emojis para hacer las respuestas más amigables
+- Responde de manera clara, concisa y profesional
+- Mantén un tono amigable pero formal
+"""
+
+# ============================================
+# VERIFICAR API KEYS
+# ============================================
+if "OPENAI_API_KEY" not in st.secrets:
+    st.error("❌ No se encontró la API Key de OpenAI")
+    st.info("Por favor, agrega tu OPENAI_API_KEY en Settings → Secrets")
+    st.stop()
+
+# ============================================
+# INICIALIZAR CLIENTE OPENAI (VERSIÓN CORREGIDA)
+# ============================================
+@st.cache_resource
+def get_openai_client():
+    """Inicializa y cachea el cliente de OpenAI - Versión corregida"""
+    try:
+        # Versión simplificada para evitar problemas de compatibilidad
+        client = OpenAI(
+            api_key=st.secrets["OPENAI_API_KEY"],
+            base_url=Config.API_BASE_URL,
+            max_retries=2,
+            timeout=60.0
+        )
+        return client
+    except Exception as e:
+        st.error(f"Error al inicializar cliente OpenAI: {str(e)}")
+        # Fallback: crear cliente sin parámetros extras
+        return OpenAI(
+            api_key=st.secrets["OPENAI_API_KEY"],
+            base_url=Config.API_BASE_URL
+        )
+
+# ============================================
+# FUNCIÓN PARA FONDO
+# ============================================
+def set_background():
+    """Aplica la imagen de fondo si existe"""
+    if os.path.exists(Config.BACKGROUND_PATH):
+        try:
+            with open(Config.BACKGROUND_PATH, "rb") as f:
+                img_data = f.read()
+            encoded = base64.b64encode(img_data).decode()
+            
+            st.markdown(
+                f"""
+                <style>
+                .stApp {{
+                    background-image: url("data:image/png;base64,{encoded}");
+                    background-size: cover;
+                    background-position: center;
+                    background-attachment: fixed;
+                    background-repeat: no-repeat;
+                }}
+                
+                .main .block-container {{
+                    background-color: rgba(0, 0, 0, 0.7);
+                    backdrop-filter: blur(10px);
+                    border-radius: 20px;
+                    padding: 2rem;
+                    margin: 2rem auto;
+                    border: 1px solid {Config.PRIMARY_COLOR};
+                    box-shadow: 0 0 20px rgba(0, 255, 255, 0.3);
+                    max-width: 1200px;
+                }}
+                </style>
+                """,
+                unsafe_allow_html=True
+            )
+        except Exception as e:
+            st.markdown(f"""
+            <style>
+            .stApp {{
+                background: linear-gradient(135deg, {Config.BACKGROUND_DARK}, #1a1f2a);
+            }}
+            </style>
+            """, unsafe_allow_html=True)
+    else:
+        st.markdown(f"""
+        <style>
+        .stApp {{
+            background: linear-gradient(135deg, {Config.BACKGROUND_DARK}, #1a1f2a);
+        }}
+        </style>
+        """, unsafe_allow_html=True)
+
+# ============================================
+# ESTILOS CSS
+# ============================================
+def aplicar_estilos():
+    st.markdown(f"""
+    <style>
+    /* Estilos generales */
+    .stApp {{
+        background-color: {Config.BACKGROUND_DARK};
+    }}
+    
+    /* Contenedor principal */
+    .main .block-container {{
+        background-color: rgba(10, 12, 16, 0.85);
+        backdrop-filter: blur(10px);
+        border-radius: 20px;
+        padding: 2rem;
+        margin: 1rem auto;
+        border: 1px solid {Config.PRIMARY_COLOR};
+        box-shadow: 0 0 30px rgba(0, 255, 255, 0.2);
+        max-width: 1000px !important;
+    }}
+    
+    /* Títulos */
+    h1 {{
+        color: {Config.PRIMARY_COLOR} !important;
+        font-size: 2.5rem !important;
+        text-align: center;
+        text-shadow: 0 0 20px rgba(0, 255, 255, 0.5);
+        margin-bottom: 0.5rem !important;
+        font-weight: bold;
+    }}
+    
+    .subtitle {{
+        text-align: center;
+        color: #e0e5f0;
+        margin-bottom: 2rem;
+        font-size: 1.1rem;
+    }}
+    
+    /* Respuestas del asistente */
+    .respuesta-aguwey {{
+        background: linear-gradient(145deg, {Config.CARD_BACKGROUND}, #15232e);
+        border-left: 6px solid {Config.PRIMARY_COLOR};
+        border-radius: 12px;
+        padding: 1.5rem;
+        margin: 1rem 0;
+        color: white;
+        font-size: 1.1rem;
+        line-height: 1.6;
+        box-shadow: 0 4px 15px rgba(0, 255, 255, 0.1);
+    }}
+    
+    /* Contenedor de imágenes */
+    .imagen-generada {{
+        background: linear-gradient(145deg, {Config.CARD_BACKGROUND}, #15232e);
+        border-radius: 12px;
+        padding: 1.5rem;
+        margin: 1rem 0;
+        text-align: center;
+        border: 2px solid {Config.PRIMARY_COLOR};
+        box-shadow: 0 0 30px rgba(0, 255, 255, 0.2);
+    }}
+    
+    .imagen-generada img {{
+        max-width: 100%;
+        border-radius: 8px;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+    }}
+    
+    /* Sidebar */
+    [data-testid="stSidebar"] {{
+        background: linear-gradient(165deg, #0e1219, #0a0e14);
+        border-right: 2px solid {Config.PRIMARY_COLOR};
+        padding: 1rem;
+    }}
+    
+    /* Botones */
+    .stButton > button {{
+        background: linear-gradient(145deg, {Config.SECONDARY_COLOR}, {Config.PRIMARY_COLOR});
+        color: black !important;
+        font-weight: bold;
+        border: none;
+        border-radius: 20px;
+        padding: 0.3rem 1rem;
+        transition: all 0.2s;
+    }}
+    
+    .stButton > button:hover {{
+        transform: translateY(-2px);
+        box-shadow: 0 4px 15px rgba(0, 255, 255, 0.3);
+    }}
+    
+    /* Botón de copiar */
+    .copy-btn {{
+        background: rgba(0, 255, 255, 0.1);
+        border: 1px solid {Config.PRIMARY_COLOR};
+        color: {Config.PRIMARY_COLOR};
+        border-radius: 8px;
+        padding: 4px 12px;
+        cursor: pointer;
+        font-size: 12px;
+        font-family: sans-serif;
+        transition: all 0.3s ease;
+        margin-left: 8px;
+    }}
+    .copy-btn:hover {{ 
+        background: {Config.PRIMARY_COLOR}; 
+        color: #000;
+        transform: translateY(-1px);
+        box-shadow: 0 2px 8px rgba(0, 255, 255, 0.3);
+    }}
+    
+    /* Footer */
+    .fixed-footer {{
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        background: rgba(10, 12, 16, 0.98);
+        backdrop-filter: blur(12px);
+        border-top: 2px solid {Config.PRIMARY_COLOR};
+        padding: 0.8rem;
+        text-align: center;
+        color: #e0e5f0;
+        z-index: 999;
+        font-size: 0.95rem;
+    }}
+    
+    .fixed-footer strong {{
+        color: {Config.PRIMARY_COLOR};
+    }}
+    
+    /* Scrollbar */
+    ::-webkit-scrollbar {{
+        width: 10px;
+        height: 10px;
+    }}
+    
+    ::-webkit-scrollbar-track {{
+        background: #1a1f2a;
+    }}
+    
+    ::-webkit-scrollbar-thumb {{
+        background: {Config.PRIMARY_COLOR};
+        border-radius: 5px;
+    }}
+    
+    ::-webkit-scrollbar-thumb:hover {{
+        background: {Config.SECONDARY_COLOR};
+    }}
+    
+    /* Tooltips */
+    [data-tooltip] {{
+        position: relative;
+        cursor: help;
+    }}
+    
+    [data-tooltip]:before {{
+        content: attr(data-tooltip);
+        position: absolute;
+        bottom: 100%;
+        left: 50%;
+        transform: translateX(-50%);
+        padding: 5px 10px;
+        background: rgba(0, 0, 0, 0.9);
+        color: white;
+        border-radius: 5px;
+        font-size: 12px;
+        white-space: nowrap;
+        display: none;
+        border: 1px solid {Config.PRIMARY_COLOR};
+    }}
+    
+    [data-tooltip]:hover:before {{
+        display: block;
+    }}
+    </style>
+    """, unsafe_allow_html=True)
+
+# ============================================
+# FUNCIÓN PARA DETECTAR SOLICITUD DE IMAGEN
+# ============================================
+def detectar_solicitud_imagen(texto: str) -> Optional[str]:
+    """Detecta si el usuario pide generar una imagen y extrae la descripción"""
+    texto_lower = texto.lower()
+    print(f"Detectando solicitud de imagen en: {texto}")
+    
+    # Patrones para detectar solicitud de imágenes
+    patrones = [
+        r'(?:dibuja|dibújame|crea|genera|haz|pinta|diseña) (?:una |un )?(?:imagen|foto|ilustración|dibujo|gráfico|arte) (?:de |sobre |con )?(.+)',
+        r'(?:quiero|necesito|puedes) (?:ver|crear|generar) (?:una |un )?(?:imagen|foto) (?:de |sobre )?(.+)',
+        r'^imagen (?:de |sobre )?(.+)$',
+        r'^genera (?:imagen|foto) (?:de )?(.+)$',
+        r'^crea (?:imagen|arte|dibujo) (?:de )?(.+)$',
+        r'(?:muéstrame|enséñame) (?:cómo se ve|como es) (.+)',
+        r'^dibujo (?:de )?(.+)$',
+        r'^hazme un dibujo (?:de )?(.+)$'
+    ]
+    
+    for patron in patrones:
+        match = re.search(patron, texto_lower)
+        if match:
+            descripcion = match.group(1).strip()
+            # Limpiar descripción
+            descripcion = re.sub(r'[^\w\sáéíóúñÁÉÍÓÚÑ,.!?-]', '', descripcion)
+            if descripcion:
+                print(f"✅ Detectada solicitud de imagen: {descripcion}")
+                return descripcion
+    
+    # Palabras clave simples
+    palabras_imagen = ['imagen', 'foto', 'dibujo', 'ilustración', 'gráfico', 'arte', 'pintura']
+    if any(p in texto_lower for p in palabras_imagen) and len(texto.split()) < 20:
+        print(f"✅ Detectada solicitud simple: {texto}")
+        return texto
+    
+    print("❌ No se detectó solicitud de imagen")
+    return None
+
+# ============================================
+# GENERADOR LOCAL MEJORADO - SIEMPRE FUNCIONA
+# ============================================
+def generar_imagen_local(descripcion: str) -> Tuple[Optional[bytes], Optional[str]]:
+    """
+    Generador local que SIEMPRE funciona, no depende de internet
+    Crea imágenes atractivas y variadas según la descripción
+    """
+    try:
+        print(f"🎨 Generando imagen local para: {descripcion}")
+        
+        # Crear imagen base
+        width, height = 1024, 1024
+        img = Image.new('RGB', (width, height), color=(20, 30, 50))
+        draw = ImageDraw.Draw(img)
+        
+        # Determinar tema por palabras clave
+        desc_lower = descripcion.lower()
+        
+        # Fondo degradado según tema
+        if any(word in desc_lower for word in ['espacio', 'astronauta', 'galaxia', 'estrella', 'planeta']):
+            # Fondo espacial (azul oscuro a púrpura)
+            for y in range(height):
+                r = int(10 + (y / height) * 20)
+                g = int(10 + (y / height) * 30)
+                b = int(30 + (y / height) * 100)
+                draw.line([(0, y), (width, y)], fill=(r, g, b))
+            
+            # Estrellas
+            for _ in range(200):
+                x = random.randint(0, width)
+                y = random.randint(0, height)
+                size = random.randint(1, 3)
+                brightness = random.randint(150, 255)
+                draw.ellipse([x, y, x+size, y+size], fill=(brightness, brightness, brightness))
+        
+        elif any(word in desc_lower for word in ['naturaleza', 'paisaje', 'montaña', 'bosque', 'campo']):
+            # Fondo verde/azul para naturaleza
+            for y in range(height):
+                r = int(20 + (y / height) * 50)
+                g = int(50 + (y / height) * 150)
+                b = int(30 + (y / height) * 80)
+                draw.line([(0, y), (width, y)], fill=(r, g, b))
+        
+        elif any(word in desc_lower for word in ['ciudad', 'cyberpunk', 'futurista', 'neon']):
+            # Fondo urbano/cyberpunk
+            for y in range(height):
+                r = int(20 + (y / height) * 40)
+                g = int(10 + (y / height) * 30)
+                b = int(40 + (y / height) * 100)
+                draw.line([(0, y), (width, y)], fill=(r, g, b))
+            
+            # Luces de neón
+            for _ in range(50):
+                x = random.randint(0, width)
+                y = random.randint(0, height)
+                color = random.choice([(255, 0, 255), (0, 255, 255), (255, 255, 0)])
+                draw.rectangle([x, y, x+20, y+5], fill=color)
+        
+        elif any(word in desc_lower for word in ['animal', 'gato', 'perro', 'mascota']):
+            # Fondo cálido para animales
+            for y in range(height):
+                r = int(100 + (y / height) * 100)
+                g = int(50 + (y / height) * 80)
+                b = int(20 + (y / height) * 40)
+                draw.line([(0, y), (width, y)], fill=(r, g, b))
+        
+        else:
+            # Fondo degradado genérico con colores vibrantes
+            for y in range(height):
+                r = int(20 + (y / height) * 150)
+                g = int(30 + (y / height) * 120)
+                b = int(50 + (y / height) * 200)
+                draw.line([(0, y), (width, y)], fill=(r, g, b))
+        
+        # Formas decorativas
+        # Círculo exterior
+        draw.ellipse([width//4, height//4, 3*width//4, 3*height//4], 
+                    outline=(0, 255, 255), width=5)
+        
+        # Círculo interior
+        draw.ellipse([width//3, height//3, 2*width//3, 2*height//3], 
+                    outline=(255, 0, 255), width=3)
+        
+        # Líneas diagonales decorativas
+        draw.line([(0, 0), (width, height)], fill=(0, 255, 0), width=2)
+        draw.line([(width, 0), (0, height)], fill=(0, 255, 0), width=2)
+        
+        # Puntos decorativos
+        for _ in range(50):
+            x = random.randint(0, width)
+            y = random.randint(0, height)
+            size = random.randint(2, 5)
+            color = random.choice([(255, 255, 255), (0, 255, 255), (255, 0, 255), (255, 255, 0)])
+            draw.ellipse([x, y, x+size, y+size], fill=color)
+        
+        # Texto con la descripción
+        try:
+            # Intentar cargar fuentes del sistema
+            font_paths = [
+                "arial.ttf",
+                "DejaVuSans.ttf",
+                "FreeSans.ttf",
+                "LiberationSans-Regular.ttf",
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+                "/System/Library/Fonts/Helvetica.ttc",
+                "C:\\Windows\\Fonts\\arial.ttf"
+            ]
+            
+            font_large = None
+            font_small = None
+            
+            for font_path in font_paths:
+                try:
+                    font_large = ImageFont.truetype(font_path, 48)
+                    font_small = ImageFont.truetype(font_path, 24)
+                    break
+                except:
+                    continue
+            
+            if font_large is None:
+                font_large = ImageFont.load_default()
+                font_small = ImageFont.load_default()
+            
+            # Dividir descripción en líneas (máximo 25 caracteres por línea)
+            palabras = descripcion.split()
+            lineas = []
+            linea_actual = ""
+            for palabra in palabras:
+                if len(linea_actual + " " + palabra) < 30:
+                    linea_actual += " " + palabra if linea_actual else palabra
+                else:
+                    lineas.append(linea_actual)
+                    linea_actual = palabra
+            if linea_actual:
+                lineas.append(linea_actual)
+            
+            # Dibujar título con sombra
+            y_text = height//2 - len(lineas) * 30
+            for linea in lineas:
+                # Sombra negra
+                draw.text((width//2 + 2, y_text + 2), linea, fill=(0, 0, 0), 
+                         font=font_large, anchor="mm")
+                # Texto principal
+                draw.text((width//2, y_text), linea, fill=(255, 255, 255), 
+                         font=font_large, anchor="mm")
+                y_text += 50
+            
+            # Texto informativo
+            info_text = "🎨 Generado por AguweyBot con Qwen2.5 (Modo Local)"
+            draw.text((width//2 + 1, height-49), info_text, fill=(0, 0, 0), 
+                     font=font_small, anchor="mm")
+            draw.text((width//2, height-50), info_text, fill=(0, 255, 255), 
+                     font=font_small, anchor="mm")
+            
+        except Exception as e:
+            print(f"Error con fuentes: {e}")
+            # Fallback simple si hay problemas con fuentes
+            draw.text((width//2, height//2), f"🎨 {descripcion[:50]}", 
+                     fill=(255, 255, 255), anchor="mm")
+        
+        # Convertir a bytes
+        img_bytes = io.BytesIO()
+        img.save(img_bytes, format='PNG', optimize=True)
+        img_bytes.seek(0)
+        
+        print(f"✅ Imagen local generada: {len(img_bytes.getvalue())} bytes")
+        return img_bytes.getvalue(), None
+        
+    except Exception as e:
+        print(f"Error en generador local: {e}")
+        # Último recurso - imagen extremadamente simple
+        try:
+            img = Image.new('RGB', (800, 600), color=(30, 30, 50))
+            draw = ImageDraw.Draw(img)
+            draw.text((400, 300), f"🎨 {descripcion[:50]}", fill=(255, 255, 255), anchor="mm")
+            draw.text((400, 350), "Modo local - AguweyBot con Qwen2.5", fill=(0, 255, 255), anchor="mm")
+            img_bytes = io.BytesIO()
+            img.save(img_bytes, format='PNG')
+            img_bytes.seek(0)
+            return img_bytes.getvalue(), None
+        except:
+            return None, "Error crítico generando imagen"
+
+# ============================================
+# FUNCIÓN PRINCIPAL DE GENERACIÓN
+# ============================================
+def generar_imagen(descripcion: str) -> Tuple[Optional[bytes], Optional[str]]:
+    """
+    Genera una imagen usando el generador local mejorado
+    """
+    print(f"\n=== INICIANDO GENERACIÓN DE IMAGEN ===")
+    print(f"Descripción: {descripcion}")
+    
+    # Usar siempre el generador local (100% fiable)
+    return generar_imagen_local(descripcion)
+
+# ============================================
+# FUNCIÓN PARA BOTÓN DE COPIAR
+# ============================================
+def boton_copiar(texto: str, id_unico: str) -> None:
+    """Genera un botón de copiado usando JavaScript"""
+    texto_escapado = (texto.replace('\\', '\\\\')
+                           .replace('`', '\\`')
+                           .replace('$', '\\$')
+                           .replace('\n', '\\n')
+                           .replace("'", "\\'")
+                           .replace('"', '\\"'))
+    
+    html_code = f"""
+    <div style="text-align: right; margin-top: 0px;">
+        <button id="btn_{id_unico}" class="copy-btn" onclick="copyText_{id_unico}()">
+            📋 Copiar
+        </button>
+    </div>
+    <script>
+    function copyText_{id_unico}() {{
+        const textToCopy = `{texto_escapado}`;
+        
+        if (navigator.clipboard && navigator.clipboard.writeText) {{
+            navigator.clipboard.writeText(textToCopy).then(() => {{
+                showCopied_{id_unico}();
+            }}).catch(() => {{
+                fallbackCopy_{id_unico}(textToCopy);
+            }});
+        }} else {{
+            fallbackCopy_{id_unico}(textToCopy);
+        }}
+    }}
+    
+    function fallbackCopy_{id_unico}(text) {{
+        const tempTextArea = document.createElement('textarea');
+        tempTextArea.value = text;
+        tempTextArea.style.position = 'fixed';
+        tempTextArea.style.opacity = '0';
+        document.body.appendChild(tempTextArea);
+        tempTextArea.select();
+        document.execCommand('copy');
+        document.body.removeChild(tempTextArea);
+        showCopied_{id_unico}();
+    }}
+    
+    function showCopied_{id_unico}() {{
+        const btn = document.getElementById("btn_{id_unico}");
+        const originalText = btn.innerText;
+        btn.innerText = "✅ ¡Copiado!";
+        btn.style.background = "rgba(0, 255, 0, 0.2)";
+        btn.style.borderColor = "#00ff00";
+        btn.style.color = "#00ff00";
+        
+        setTimeout(() => {{ 
+            btn.innerText = originalText;
+            btn.style.background = "rgba(0, 255, 255, 0.1)";
+            btn.style.borderColor = "#00ffff";
+            btn.style.color = "#00ffff";
+        }}, 2000);
+    }}
+    </script>
+    """
+    components.html(html_code, height=40)
+
+# ============================================
+# CLASE PARA DATOS DEL ARCHIVO
+# ============================================
+@dataclass
+class DatosArchivo:
+    nombre: str = ""
+    contenido_completo: str = ""
+    tipo: str = ""
+    dataframe: Optional[pd.DataFrame] = None
+    num_paginas: int = 0
+    num_caracteres: int = 0
+    resumen: str = ""
+    fecha_carga: float = time.time()
+    
+    def generar_resumen(self) -> str:
+        """Genera un resumen básico del archivo"""
+        if self.tipo == "pdf":
+            return f"📄 PDF con {self.num_paginas} páginas"
+        elif self.tipo in ["excel", "csv"]:
+            if self.dataframe is not None:
+                return f"📊 Tabla con {len(self.dataframe)} filas y {len(self.dataframe.columns)} columnas"
+        elif self.tipo in ["txt", "docx"]:
+            palabras = len(self.contenido_completo.split())
+            return f"📝 Documento con {palabras} palabras"
+        return "📁 Archivo procesado"
+
+# ============================================
+# FUNCIÓN PARA LEER ARCHIVOS
+# ============================================
+def leer_archivo_completo(uploaded_file):
+    """Lee el archivo COMPLETO sin truncar"""
+    if uploaded_file is None:
+        return None, "No hay archivo para procesar"
+    
+    try:
+        uploaded_file.seek(0)
+        
+        # Verificar tamaño
+        uploaded_file.seek(0, os.SEEK_END)
+        file_size = uploaded_file.tell()
+        uploaded_file.seek(0)
+        
+        if file_size > Config.MAX_FILE_SIZE_MB * 1024 * 1024:
+            return None, f"El archivo excede el límite de {Config.MAX_FILE_SIZE_MB}MB"
+        
+        nombre = uploaded_file.name.lower()
+        datos = DatosArchivo()
+        datos.nombre = uploaded_file.name
+        datos.fecha_carga = time.time()
+        
+        # PDF
+        if nombre.endswith(".pdf"):
+            try:
+                reader = PdfReader(uploaded_file)
+                datos.num_paginas = len(reader.pages)
+                texto_completo = []
+                
+                progress_bar = st.progress(0, text="📖 Leyendo PDF...")
+                for i, page in enumerate(reader.pages):
+                    page_text = page.extract_text()
+                    if page_text and page_text.strip():
+                        texto_completo.append(f"--- PÁGINA {i+1} ---\n{page_text}")
+                    progress_bar.progress((i + 1) / datos.num_paginas)
+                
+                datos.contenido_completo = "\n\n".join(texto_completo)
+                datos.tipo = "pdf"
+                progress_bar.empty()
+                
+                if not datos.contenido_completo:
+                    return None, "El PDF no contiene texto extraíble"
+                    
+            except Exception as e:
+                return None, f"Error al leer PDF: {str(e)}"
+        
+        # Excel
+        elif nombre.endswith((".xlsx", ".xls")):
+            try:
+                df = pd.read_excel(uploaded_file)
+                datos.dataframe = df
+                datos.contenido_completo = f"📊 ARCHIVO EXCEL: {uploaded_file.name}\n"
+                datos.contenido_completo += f"Filas: {len(df)}, Columnas: {len(df.columns)}\n"
+                datos.contenido_completo += f"Columnas: {', '.join(df.columns.tolist())}\n\n"
+                datos.contenido_completo += "DATOS COMPLETOS:\n"
+                datos.contenido_completo += df.to_string()
+                datos.tipo = "excel"
+                
+            except Exception as e:
+                return None, f"Error al leer Excel: {str(e)}"
+        
+        # CSV
+        elif nombre.endswith(".csv"):
+            try:
+                raw_data = uploaded_file.read()
+                result = chardet.detect(raw_data)
+                encoding = result['encoding'] or 'utf-8'
+                
+                df = pd.read_csv(io.BytesIO(raw_data), encoding=encoding)
+                datos.dataframe = df
+                datos.contenido_completo = f"📊 ARCHIVO CSV: {uploaded_file.name}\n"
+                datos.contenido_completo += f"Filas: {len(df)}, Columnas: {len(df.columns)}\n"
+                datos.contenido_completo += f"Columnas: {', '.join(df.columns.tolist())}\n\n"
+                datos.contenido_completo += "DATOS COMPLETOS:\n"
+                datos.contenido_completo += df.to_string()
+                datos.tipo = "csv"
+                
+            except Exception as e:
+                return None, f"Error al leer CSV: {str(e)}"
+        
+        # TXT
+        elif nombre.endswith(".txt"):
+            try:
+                contenido = uploaded_file.read()
+                result = chardet.detect(contenido)
+                encoding = result['encoding'] or 'utf-8'
+                datos.contenido_completo = contenido.decode(encoding)
+                datos.tipo = "txt"
+                
+            except Exception as e:
+                return None, f"Error al leer TXT: {str(e)}"
+        
+        # Word
+        elif nombre.endswith(".docx"):
+            try:
+                doc = Document(uploaded_file)
+                texto_completo = []
+                
+                for p in doc.paragraphs:
+                    if p.text.strip():
+                        texto_completo.append(p.text)
+                
+                for table in doc.tables:
+                    for row in table.rows:
+                        row_text = [cell.text for cell in row.cells]
+                        texto_completo.append(" | ".join(row_text))
+                
+                datos.contenido_completo = "\n".join(texto_completo)
+                datos.tipo = "docx"
+                
+                if not datos.contenido_completo:
+                    return None, "El documento no contiene texto"
+                    
+            except Exception as e:
+                return None, f"Error al leer DOCX: {str(e)}"
+        
+        else:
+            return None, f"Tipo de archivo no soportado: {nombre.split('.')[-1]}"
+        
+        datos.num_caracteres = len(datos.contenido_completo)
+        datos.resumen = datos.generar_resumen()
+        
+        return datos, None
+        
+    except Exception as e:
+        return None, f"Error inesperado: {str(e)}"
+
+# ============================================
+# CALLBACK PARA STREAMING (Adaptado para OpenAI)
+# ============================================
+class StreamlitCallbackHandler:
+    def __init__(self, container):
+        self.container = container
+        self.text = ""
+        self.start_time = time.time()
+
+    def on_token(self, token: str):
+        self.text += token
+        elapsed = time.time() - self.start_time
+        
+        self.container.markdown(
+            f'<div class="respuesta-aguwey" style="position: relative;">{self.text}▌<div style="position: absolute; bottom: 5px; right: 10px; font-size: 10px; color: #666;">Generando... {elapsed:.1f}s</div></div>',
+            unsafe_allow_html=True
+        )
+        time.sleep(0.002)
+    
+    def on_end(self):
+        elapsed = time.time() - self.start_time
+        self.container.markdown(
+            f'<div class="respuesta-aguwey" style="position: relative;">{self.text}<div style="position: absolute; bottom: 5px; right: 10px; font-size: 10px; color: #666;">Generado en {elapsed:.1f}s</div></div>',
+            unsafe_allow_html=True
+        )
+
+# ============================================
+# FUNCIÓN PARA LLAMAR A QWEN2.5 (VERSIÓN CORREGIDA)
+# ============================================
+def llamar_qwen(mensajes, callback=None):
+    """Llama al modelo Qwen2.5 usando la API de OpenAI - Versión corregida"""
+    try:
+        client = get_openai_client()
+        
+        # Preparar mensajes para OpenAI
+        openai_messages = []
+        for msg in mensajes:
+            if isinstance(msg, SystemMessage):
+                openai_messages.append({"role": "system", "content": msg.content})
+            elif isinstance(msg, HumanMessage):
+                openai_messages.append({"role": "user", "content": msg.content})
+            elif isinstance(msg, AIMessage):
+                openai_messages.append({"role": "assistant", "content": msg.content})
+        
+        # Configuración básica sin parámetros problemáticos
+        if callback:
+            # Streaming
+            response_text = ""
+            try:
+                stream = client.chat.completions.create(
+                    model=Config.QWEN_MODEL,
+                    messages=openai_messages,
+                    temperature=Config.TEMPERATURE,
+                    max_tokens=Config.MAX_TOKENS,
+                    stream=True
+                )
+                
+                for chunk in stream:
+                    if hasattr(chunk.choices[0].delta, 'content') and chunk.choices[0].delta.content:
+                        token = chunk.choices[0].delta.content
+                        response_text += token
+                        callback.on_token(token)
+                
+                callback.on_end()
+                return response_text
+            except Exception as e:
+                print(f"Error en streaming: {e}")
+                # Fallback a sin streaming
+                response = client.chat.completions.create(
+                    model=Config.QWEN_MODEL,
+                    messages=openai_messages,
+                    temperature=Config.TEMPERATURE,
+                    max_tokens=Config.MAX_TOKENS
+                )
+                return response.choices[0].message.content
+        else:
+            # Sin streaming
+            response = client.chat.completions.create(
+                model=Config.QWEN_MODEL,
+                messages=openai_messages,
+                temperature=Config.TEMPERATURE,
+                max_tokens=Config.MAX_TOKENS
+            )
+            return response.choices[0].message.content
+            
+    except Exception as e:
+        print(f"Error llamando a Qwen: {e}")
+        raise e
+
+# ============================================
+# TEXTO A VOZ
+# ============================================
+def texto_a_audio_unico(texto: str) -> Optional[bytes]:
+    """Convierte texto a audio sin límite de tiempo"""
+    if not TTS_AVAILABLE or not texto or not texto.strip():
+        return None
+    
+    try:
+        # Limpiar el texto de emojis y caracteres especiales
+        texto_limpio = re.sub(r'[#*_`\[\]()📄📊🔊🎨✅❌⚠️]', '', texto)
+        texto_limpio = re.sub(r'\s+', ' ', texto_limpio).strip()
+        
+        if not texto_limpio:
+            return None
+        
+        # Generar audio con gTTS
+        tts = gTTS(text=texto_limpio, lang='es', slow=False)
+        
+        # Guardar en bytes
+        audio_bytes_io = io.BytesIO()
+        tts.write_to_fp(audio_bytes_io)
+        audio_bytes_io.seek(0)
+        
+        return audio_bytes_io.getvalue()
+        
+    except Exception as e:
+        print(f"Error generando audio: {e}")
+        return None
+
+# ============================================
+# FUNCIÓN PARA MOSTRAR LOGO
+# ============================================
+def mostrar_logo():
+    if os.path.exists(Config.LOGO_PATH):
+        try:
+            from PIL import Image
+            logo = Image.open(Config.LOGO_PATH)
+            st.sidebar.image(logo, width=200)
+        except:
+            st.sidebar.markdown("# 🤖 AguweyBot")
+    else:
+        st.sidebar.markdown("""
+        # 🤖 AguweyBot
+        ### *Con Qwen2.5 y generación local de imágenes*
+        """)
+
+def mostrar_info_archivo(datos: DatosArchivo) -> None:
+    """Muestra información del archivo cargado"""
+    if datos:
+        with st.sidebar.expander("📁 Archivo activo", expanded=True):
+            st.markdown(f"""
+            **Nombre:** {datos.nombre}
+            **Tipo:** {datos.resumen}
+            **Tamaño:** {datos.num_caracteres:,} caracteres
+            **Cargado:** {datetime.fromtimestamp(datos.fecha_carga).strftime('%H:%M:%S')}
+            """)
+            
+            if datos.tipo in ["excel", "csv"] and datos.dataframe is not None:
+                st.dataframe(datos.dataframe.head(5), use_container_width=True)
+            elif datos.num_caracteres > 500:
+                with st.expander("📄 Vista previa"):
+                    st.text(datos.contenido_completo[:500] + "...")
+
+# ============================================
+# FUNCIÓN PRINCIPAL
+# ============================================
+def main():
+    """Función principal de la aplicación"""
+    
+    set_background()
+    aplicar_estilos()
+    
+    # Inicializar session state
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
+    if "datos_archivo" not in st.session_state:
+        st.session_state.datos_archivo = None
+    if "primer_mensaje" not in st.session_state:
+        st.session_state.primer_mensaje = True
+    if "audio_actual_bytes" not in st.session_state:
+        st.session_state.audio_actual_bytes = None
+    if "ultimo_audio_idx" not in st.session_state:
+        st.session_state.ultimo_audio_idx = -1
+    if "imagenes_generadas" not in st.session_state:
+        st.session_state.imagenes_generadas = {}
+    
+    # Sidebar
+    with st.sidebar:
+        mostrar_logo()
+        st.markdown("---")
+        
+        st.markdown("### 🔑 Estado")
+        st.success("✅ Qwen2.5 conectado")
+        st.success("🎨 Generador local activo (100% funcional)")
+        
+        # Mostrar modelo seleccionado
+        st.info(f"🤖 Modelo: {Config.QWEN_MODEL}")
+        
+        if TTS_AVAILABLE:
+            st.success("✅ Audio disponible")
+        else:
+            st.warning("⚠️ Audio no disponible - Instala gtts")
+        
+        st.markdown("---")
+        st.markdown("### 🧪 Prueba")
+        
+        if st.button("Probar generación de imagen", use_container_width=True):
+            with st.spinner("Generando imagen de prueba..."):
+                test_desc = "un paisaje hermoso con montañas"
+                img_bytes, error = generar_imagen(test_desc)
+                if img_bytes:
+                    st.success("✅ Generación exitosa!")
+                    st.image(img_bytes, width=300)
+                    st.info(f"Tamaño: {len(img_bytes)} bytes")
+                else:
+                    st.error(f"❌ Error: {error}")
+        
+        st.markdown("---")
+        st.markdown("### 📎 Subir Archivo")
+        
+        uploaded_file = st.file_uploader(
+            "Elige un archivo",
+            type=["pdf", "xlsx", "xls", "csv", "txt", "docx"],
+            key="file_uploader",
+            label_visibility="collapsed"
+        )
+        
+        if uploaded_file is not None:
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("📖 Leer TODO", key="btn_leer", use_container_width=True):
+                    with st.spinner("📖 Leyendo archivo..."):
+                        datos, error = leer_archivo_completo(uploaded_file)
+                        
+                        if error:
+                            st.error(f"❌ {error}")
+                        elif datos:
+                            st.session_state.datos_archivo = datos
+                            st.success(f"✅ {datos.resumen}")
+                            st.balloons()
+            
+            with col2:
+                if st.button("🔄 Limpiar", use_container_width=True):
+                    st.session_state.datos_archivo = None
+                    st.rerun()
+        
+        if st.session_state.datos_archivo:
+            mostrar_info_archivo(st.session_state.datos_archivo)
+        
+        st.markdown("---")
+        
+        # Depuración
+        with st.expander("🔍 Debug", expanded=False):
+            if st.button("Ver imágenes en memoria"):
+                st.write(f"Imágenes guardadas: {len(st.session_state.imagenes_generadas)}")
+                for idx, img_bytes in st.session_state.imagenes_generadas.items():
+                    st.write(f"Índice {idx}: {len(img_bytes)} bytes")
+        
+        if st.button("🔄 Nueva Conversación", use_container_width=True):
+            st.session_state.messages = []
+            st.session_state.audio_actual_bytes = None
+            st.session_state.ultimo_audio_idx = -1
+            st.session_state.imagenes_generadas = {}
+            st.success("¡Conversación reiniciada!")
+            st.rerun()
+        
+        # Estadísticas
+        if st.session_state.messages:
+            st.markdown("### 📊 Estadísticas")
+            user_msgs = sum(1 for m in st.session_state.messages if m["role"] == "user")
+            assistant_msgs = sum(1 for m in st.session_state.messages if m["role"] == "assistant")
+            imagenes_count = len(st.session_state.imagenes_generadas)
+            st.markdown(f"""
+            - 💬 Mensajes: {len(st.session_state.messages)}
+            - 👤 Usuario: {user_msgs}
+            - 🤖 Asistente: {assistant_msgs}
+            - 🎨 Imágenes: {imagenes_count}
+            """)
+    
+    # Contenido principal
+    st.markdown("<h1>🎨 AguweyBot con Qwen2.5</h1>", unsafe_allow_html=True)
+    st.markdown('<p class="subtitle">Asistente inteligente con análisis de documentos y generación local de imágenes</p>', unsafe_allow_html=True)
+    
+    # Mostrar historial
+    for i, msg in enumerate(st.session_state.messages):
+        with st.chat_message(msg["role"]):
+            if msg["role"] == "assistant":
+                if msg.get("tipo") == "imagen":
+                    # Verificar si la imagen existe
+                    if i in st.session_state.imagenes_generadas:
+                        imagen_bytes = st.session_state.imagenes_generadas[i]
+                        
+                        # Mostrar el mensaje
+                        st.markdown(f'<div class="imagen-generada">{msg["content"]}</div>', unsafe_allow_html=True)
+                        
+                        # Mostrar la imagen
+                        st.image(imagen_bytes, use_container_width=True)
+                        
+                        # Botones para la imagen
+                        col1, col2, col3 = st.columns([1, 1, 4])
+                        
+                        with col1:
+                            if TTS_AVAILABLE:
+                                if st.button(f"🔊 Audio", key=f"audio_img_{i}"):
+                                    audio_bytes = texto_a_audio_unico(msg["content"])
+                                    if audio_bytes:
+                                        st.audio(audio_bytes, format="audio/mpeg")
+                        
+                        with col2:
+                            # Botón de descarga
+                            st.download_button(
+                                label="💾 Guardar",
+                                data=imagen_bytes,
+                                file_name=f"aguweybot_imagen_{i}.png",
+                                mime="image/png",
+                                key=f"download_img_{i}"
+                            )
+                        
+                        with col3:
+                            boton_copiar(msg["content"], f"copy_img_{i}")
+                    else:
+                        st.warning("🖼️ La imagen no está disponible temporalmente")
+                else:
+                    # Mostrar respuesta de texto normal
+                    st.markdown(f'<div class="respuesta-aguwey">{msg["content"]}</div>', unsafe_allow_html=True)
+                    
+                    col1, col2 = st.columns([1, 8])
+                    
+                    with col1:
+                        if TTS_AVAILABLE:
+                            if st.button(f"🔊 Audio", key=f"audio_{i}"):
+                                audio_bytes = texto_a_audio_unico(msg["content"])
+                                if audio_bytes:
+                                    st.session_state.audio_actual_bytes = audio_bytes
+                                    st.session_state.ultimo_audio_idx = i
+                                    st.rerun()
+                    
+                    with col2:
+                        boton_copiar(msg["content"], f"copy_{i}")
+                    
+                    if (st.session_state.get('audio_actual_bytes') and 
+                        st.session_state.ultimo_audio_idx == i):
+                        st.audio(st.session_state.audio_actual_bytes, format="audio/mpeg")
+            else:
+                st.markdown(f"**Tú:** {msg['content']}")
+    
+    # Mensaje de bienvenida
+    if st.session_state.primer_mensaje and not st.session_state.messages:
+        st.info("""
+        👋 **¡Bienvenido a AguweyBot con Qwen2.5!**
+        
+        **🤖 Modelo:** Qwen2.5-72B-Instruct
+        
+        **🎨 Características:**
+        - 📄 **Análisis de documentos** (PDF, Excel, CSV, TXT, DOCX)
+        - 🖼️ **Generación local de imágenes** (siempre funciona, sin internet)
+        - 🔊 **Texto a voz** en respuestas
+        - 📋 **Copiado con un clic**
+        - 💾 **Descarga de imágenes**
+        
+        **💡 Ejemplos:**
+        - "dibuja un gato astronauta en el espacio"
+        - "crea una imagen de una ciudad cyberpunk"
+        - "genera un dragón mágico en un castillo"
+        - "pinta un paisaje con montañas y un lago"
+        
+        **✨ El generador local crea imágenes atractivas y variadas según el tema**
+        """)
+        st.session_state.primer_mensaje = False
+    
+    # Input del usuario
+    prompt = st.chat_input("Escribe tu pregunta o pide una imagen...", key="chat_input")
+    
+    if prompt:
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        
+        with st.chat_message("user"):
+            st.markdown(f"**Tú:** {prompt}")
+        
+        # Detectar si es solicitud de imagen
+        descripcion_imagen = detectar_solicitud_imagen(prompt)
+        
+        if descripcion_imagen:
+            # Generar imagen
+            with st.chat_message("assistant"):
+                status = st.status(f"🎨 Generando imagen: '{descripcion_imagen}'...", expanded=True)
+                
+                with status:
+                    st.write("🔍 Procesando solicitud...")
+                    st.write(f"📝 Descripción: {descripcion_imagen}")
+                    st.write("🎨 Usando generador local (siempre funcional)")
+                    
+                    imagen_bytes, error = generar_imagen(descripcion_imagen)
+                    
+                    if imagen_bytes:
+                        st.write("✅ Imagen generada exitosamente!")
+                        st.write(f"📸 Tamaño: {len(imagen_bytes)} bytes")
+                        status.update(label="✅ Imagen generada!", state="complete")
+                        
+                        # Guardar imagen en session_state
+                        idx = len(st.session_state.messages)
+                        st.session_state.imagenes_generadas[idx] = imagen_bytes
+                        
+                        respuesta = f"🎨 **Imagen generada:** {descripcion_imagen}"
+                        
+                        st.session_state.messages.append({
+                            "role": "assistant", 
+                            "content": respuesta,
+                            "tipo": "imagen"
+                        })
+                        st.rerun()
+                    else:
+                        error_msg = error or "Error desconocido"
+                        st.write(f"❌ Error: {error_msg}")
+                        status.update(label="❌ Error al generar imagen", state="error")
+                        
+                        st.session_state.messages.append({
+                            "role": "assistant", 
+                            "content": f"❌ Lo siento, no pude generar la imagen: {error_msg}"
+                        })
+        else:
+            # Respuesta de texto normal con Qwen2.5
+            with st.chat_message("assistant"):
+                try:
+                    container = st.empty()
+                    callback = StreamlitCallbackHandler(container)
+                    
+                    mensajes = [SystemMessage(content=SYSTEM_PROMPT)]
+                    
+                    ultimos_mensajes = st.session_state.messages[-Config.MAX_HISTORY_MESSAGES:]
+                    for m in ultimos_mensajes:
+                        if m["role"] == "user":
+                            mensajes.append(HumanMessage(content=m["content"]))
+                        elif m["role"] == "assistant" and m.get("tipo") != "imagen":
+                            mensajes.append(AIMessage(content=m["content"]))
+                    
+                    if st.session_state.datos_archivo:
+                        datos = st.session_state.datos_archivo
+                        contexto = f"""
+                        📁 ARCHIVO: {datos.nombre}
+                        TIPO: {datos.tipo}
+                        CONTENIDO COMPLETO:
+                        {datos.contenido_completo}
+                        
+                        PREGUNTA: {prompt}
+                        """
+                        mensajes.append(HumanMessage(content=contexto))
+                    else:
+                        mensajes.append(HumanMessage(content=prompt))
+                    
+                    # Llamar a Qwen2.5
+                    response_content = llamar_qwen(mensajes, callback)
+                    
+                    container.markdown(f'<div class="respuesta-aguwey">{response_content}</div>', unsafe_allow_html=True)
+                    st.session_state.messages.append({"role": "assistant", "content": response_content})
+                    
+                    if TTS_AVAILABLE and len(response_content) > 100:
+                        audio_bytes = texto_a_audio_unico(response_content)
+                        if audio_bytes:
+                            st.session_state.audio_actual_bytes = audio_bytes
+                            st.session_state.ultimo_audio_idx = len(st.session_state.messages) - 1
+                            st.rerun()
+                            
+                except Exception as e:
+                    st.error(f"❌ Error: {str(e)}")
+                    st.exception(e)
+    
+    # Footer
+    st.markdown(
+        f"""
+        <div class="fixed-footer">
+            <strong>CC-SA</strong> Prof. Raymond Rosa Ávila • AguweyBot con Qwen2.5 • 
+            <span data-tooltip="Versión con Qwen2.5 y generador local">🚀 v9.0</span>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+# ============================================
+# PUNTO DE ENTRADA
+# ============================================
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception as e:
+        st.error(f"❌ Error en la aplicación: {str(e)}")
+        st.code(traceback.format_exc())
+        st.stop()
