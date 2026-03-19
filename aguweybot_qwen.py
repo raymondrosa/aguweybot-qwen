@@ -1,5 +1,5 @@
 # ============================================
-# AGUWEYBOT - VERSIÓN CON OPENROUTER - CORREGIDO Y ROBUSTECIDO
+# AGUWEYBOT - VERSIÓN CON OPENROUTER - CORREGIDO Y OPTIMIZADO
 # ============================================
 
 import os
@@ -78,6 +78,7 @@ class Config:
     MAX_FILE_SIZE_MB = 50
     MAX_IMAGE_SIZE_MB = 5
     MAX_DOCUMENT_CHARS = 50000
+    MAX_CONTEXT_CHARS = 4000  # Nuevo: límite para contexto en prompts
 
     # Configuración OpenRouter
     OPENROUTER_MODEL = "qwen/qwen-2.5-7b-instruct"
@@ -212,7 +213,7 @@ def aplicar_estilos():
             background-color: rgba(10, 12, 16, 0.85);
             backdrop-filter: blur(10px);
             border-radius: 20px;
-            padding: 2rem 2rem 7rem 2rem !important;
+            padding-bottom: 100px !important;
             margin: 1rem auto 0 auto !important;
             border: 1px solid {Config.PRIMARY_COLOR};
             box-shadow: 0 0 30px rgba(0, 255, 255, 0.2);
@@ -349,7 +350,7 @@ def aplicar_estilos():
         /* ===== BARRA DE ESCRITURA FIJA EN LA PARTE INFERIOR ===== */
         .stChatInputContainer {{
             position: fixed !important;
-            bottom: 70px !important;
+            bottom: 20px !important;
             left: 50% !important;
             transform: translateX(-50%) !important;
             width: 700px !important;
@@ -481,13 +482,14 @@ def aplicar_estilos():
         /* Footer ajustado */
         .fixed-footer {{
             position: fixed;
+            height: 35px;
             bottom: 0;
             left: 0;
             right: 0;
             background: rgba(10, 12, 16, 0.98);
             backdrop-filter: blur(12px);
             border-top: 2px solid {Config.PRIMARY_COLOR};
-            padding: 0.8rem;
+            padding: 0.2rem;
             text-align: center;
             color: #e0e5f0;
             z-index: 1002;
@@ -853,10 +855,10 @@ class DatosArchivo:
         return base
 
 # ============================================
-# FUNCIÓN PARA LEER ARCHIVOS
+# FUNCIÓN PARA LEER ARCHIVOS (MEJORADA)
 # ============================================
 def leer_archivo_completo(uploaded_file):
-    """Lee el archivo con un límite de caracteres"""
+    """Lee el archivo con un límite de caracteres y optimización"""
     if uploaded_file is None:
         return None, "No hay archivo para procesar"
 
@@ -995,6 +997,13 @@ def leer_archivo_completo(uploaded_file):
 
         else:
             return None, f"Tipo de archivo no soportado: {nombre.split('.')[-1]}"
+
+        # Optimizar si es muy grande
+        if datos.contenido_completo and len(datos.contenido_completo) > Config.MAX_CONTEXT_CHARS:
+            lines = datos.contenido_completo.split('\n')
+            if len(lines) > 200:
+                datos.contenido_completo = '\n'.join(lines[:100] + ['... [CONTENIDO TRUNCADO] ...'] + lines[-100:])
+                datos.truncado = True
 
         datos.num_caracteres = len(datos.contenido_completo)
         datos.resumen = datos.generar_resumen()
@@ -1238,7 +1247,7 @@ def mostrar_info_archivo(datos: DatosArchivo) -> None:
                 )
 
 # ============================================
-# FUNCIÓN PRINCIPAL
+# FUNCIÓN PRINCIPAL CORREGIDA
 # ============================================
 def main():
     """Función principal de la aplicación"""
@@ -1260,6 +1269,9 @@ def main():
         st.session_state.imagenes_generadas = {}
     if "procesando" not in st.session_state:
         st.session_state.procesando = False
+    # NUEVO: Para evitar procesamiento duplicado
+    if "ultimo_mensaje_procesado" not in st.session_state:
+        st.session_state.ultimo_mensaje_procesado = None
 
     # Sidebar
     with st.sidebar:
@@ -1332,6 +1344,7 @@ def main():
             st.session_state.imagenes_generadas = {}
             st.session_state.datos_archivo = None
             st.session_state.procesando = False
+            st.session_state.ultimo_mensaje_procesado = None
             st.success("¡Conversación reiniciada!")
             st.rerun()
 
@@ -1447,125 +1460,130 @@ def main():
         disabled=st.session_state.procesando
     )
 
+    # CORREGIDO: Manejo del input del usuario
     if prompt and not st.session_state.procesando:
-        st.session_state.procesando = True
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        st.rerun()
+        # Solo procesar si es un mensaje nuevo
+        if prompt != st.session_state.ultimo_mensaje_procesado:
+            st.session_state.ultimo_mensaje_procesado = prompt
+            st.session_state.messages.append({"role": "user", "content": prompt})
+            st.session_state.procesando = True
+            st.rerun()
 
-    # Procesamiento del último mensaje
+    # CORREGIDO: Procesamiento del último mensaje
     if st.session_state.procesando:
-        last_user_message = next(
-            (m["content"] for m in reversed(st.session_state.messages) if m["role"] == "user"),
-            None
-        )
-        if last_user_message:
-            descripcion_imagen = detectar_solicitud_imagen(last_user_message)
-            if descripcion_imagen:
-                with st.chat_message("assistant"):
-                    status = st.status(
-                        f"🎨 Generando imagen: '{descripcion_imagen}'...",
-                        expanded=True
-                    )
-                    with status:
-                        st.write("🔍 Procesando solicitud...")
-                        st.write(f"📝 Descripción: {descripcion_imagen}")
-                        st.write("🎨 Usando generador local")
-
-                        imagen_bytes, error = generar_imagen(descripcion_imagen)
-                        if imagen_bytes:
-                            st.write("✅ Imagen generada exitosamente!")
-                            status.update(label="✅ Imagen generada!", state="complete")
-
-                            idx = len(st.session_state.messages)
-                            st.session_state.imagenes_generadas[idx] = imagen_bytes
-
+        # Obtener el último mensaje del usuario
+        user_messages = [m for m in st.session_state.messages if m["role"] == "user"]
+        if user_messages:
+            last_user_message = user_messages[-1]["content"]
+            
+            # Verificar que no sea el mismo que ya procesamos
+            if last_user_message == st.session_state.ultimo_mensaje_procesado:
+                
+                # Detectar si es solicitud de imagen
+                descripcion_imagen = detectar_solicitud_imagen(last_user_message)
+                
+                if descripcion_imagen:
+                    # Procesar imagen
+                    with st.chat_message("assistant"):
+                        status = st.status(f"🎨 Generando imagen...", expanded=True)
+                        with status:
+                            st.write(f"📝 {descripcion_imagen}")
+                            imagen_bytes, error = generar_imagen(descripcion_imagen)
                             
-                            respuesta = f"🎨 **Imagen generada:** {descripcion_imagen}"
+                            if imagen_bytes:
+                                idx = len(st.session_state.messages)
+                                st.session_state.imagenes_generadas[idx] = imagen_bytes
+                                respuesta = f"🎨 **Imagen generada:** {descripcion_imagen}"
+                                status.update(label="✅ Imagen lista!", state="complete")
+                            else:
+                                respuesta = f"❌ Error: {error or 'desconocido'}"
+                                status.update(label="❌ Error", state="error")
+                            
                             st.session_state.messages.append(
-                                {
-                                    "role": "assistant",
-                                    "content": respuesta,
-                                    "tipo": "imagen",
-                                }
+                                {"role": "assistant", "content": respuesta, 
+                                 "tipo": "imagen" if imagen_bytes else "texto"}
                             )
-                        else:
-                            error_msg = error or "Error desconocido"
-                            st.write(f"❌ Error: {error_msg}")
-                            status.update(
-                                label="❌ Error al generar imagen",
-                                state="error"
+                else:
+                    # Procesar consulta de texto
+                    with st.chat_message("assistant"):
+                        try:
+                            container = st.empty()
+                            callback = StreamlitCallbackHandler(container)
+                            
+                            # Preparar mensajes
+                            mensajes = [SystemMessage(content=SYSTEM_PROMPT)]
+                            
+                            # Agregar historial reciente (excluyendo el último mensaje del usuario que ya procesamos)
+                            ultimos_mensajes = st.session_state.messages[-(Config.MAX_HISTORY_MESSAGES*2):-1]
+                            
+                            for m in ultimos_mensajes:
+                                if m["role"] == "user":
+                                    mensajes.append(HumanMessage(content=m["content"]))
+                                elif m["role"] == "assistant" and m.get("tipo") != "imagen":
+                                    mensajes.append(AIMessage(content=m["content"]))
+                            
+                            # Agregar contexto del archivo si existe
+                            if st.session_state.datos_archivo:
+                                datos = st.session_state.datos_archivo
+                                # Limitar el contenido para no exceder tokens
+                                contenido_limitado = datos.contenido_completo
+                                if len(contenido_limitado) > Config.MAX_CONTEXT_CHARS:
+                                    contenido_limitado = contenido_limitado[:Config.MAX_CONTEXT_CHARS] + "... [TRUNCADO PARA OPTIMIZAR]"
+                                
+                                contexto = f"""
+                                📁 ARCHIVO: {datos.nombre}
+                                TIPO: {datos.tipo}
+                                CONTENIDO:
+                                {contenido_limitado}
+                                
+                                PREGUNTA DEL USUARIO: {last_user_message}
+                                """
+                                mensajes.append(HumanMessage(content=contexto))
+                            else:
+                                mensajes.append(HumanMessage(content=last_user_message))
+                            
+                            # Obtener respuesta
+                            response_content = llamar_openrouter(mensajes, callback)
+                            
+                            # Mostrar respuesta final
+                            container.markdown(
+                                f'<div class="respuesta-aguwey">{response_content}</div>',
+                                unsafe_allow_html=True
                             )
+                            
+                            # Guardar en historial
                             st.session_state.messages.append(
-                                {
-                                    "role": "assistant",
-                                    "content": f"❌ Lo siento, no pude generar la imagen: {error_msg}",
-                                }
+                                {"role": "assistant", "content": response_content}
                             )
+                            
+                            # Generar audio si es necesario
+                            if TTS_AVAILABLE and len(response_content) > 100:
+                                audio_bytes = texto_a_audio_unico(response_content)
+                                if audio_bytes:
+                                    st.session_state.audio_actual_bytes = audio_bytes
+                                    st.session_state.audio_actual_idx = len(st.session_state.messages) - 1
+                                    
+                        except Exception as e:
+                            st.error(f"❌ Error: {str(e)}")
+                            st.session_state.messages.append(
+                                {"role": "assistant", 
+                                 "content": f"❌ Lo siento, ocurrió un error: {str(e)[:200]}"}
+                            )
+                
+                # IMPORTANTE: Resetear estado de procesamiento
+                st.session_state.procesando = False
+                st.rerun()
             else:
-                with st.chat_message("assistant"):
-                    try:
-                        container = st.empty()
-                        callback = StreamlitCallbackHandler(container)
-
-                        mensajes = [SystemMessage(content=SYSTEM_PROMPT)]
-                        ultimos_mensajes = st.session_state.messages[-Config.MAX_HISTORY_MESSAGES:]
-
-                        for m in ultimos_mensajes:
-                            if m["role"] == "user":
-                                mensajes.append(HumanMessage(content=m["content"]))
-                            elif m["role"] == "assistant" and m.get("tipo") != "imagen":
-                                mensajes.append(AIMessage(content=m["content"]))
-
-                        if st.session_state.datos_archivo:
-                            datos = st.session_state.datos_archivo
-                            contexto = f"""
-                            📁 ARCHIVO: {datos.nombre}
-                            TIPO: {datos.tipo} {'(TRUNCADO)' if datos.truncado else ''}
-                            CONTENIDO COMPLETO:
-                            {datos.contenido_completo}
-
-                            PREGUNTA: {last_user_message}
-                            """
-                            mensajes.append(HumanMessage(content=contexto))
-                        else:
-                            mensajes.append(HumanMessage(content=last_user_message))
-
-                        response_content = llamar_openrouter(mensajes, callback)
-                        container.markdown(
-                            f'<div class="respuesta-aguwey">{response_content}</div>',
-                            unsafe_allow_html=True
-                        )
-                        st.session_state.messages.append(
-                            {"role": "assistant", "content": response_content}
-                        )
-
-                        if TTS_AVAILABLE and len(response_content) > 100:
-                            audio_bytes = texto_a_audio_unico(response_content)
-                            if audio_bytes:
-                                st.session_state.audio_actual_bytes = audio_bytes
-                                st.session_state.audio_actual_idx = len(
-                                    st.session_state.messages
-                                ) - 1
-
-                    except Exception as e:
-                        st.error(f"❌ Error al obtener respuesta: {str(e)}")
-                        st.exception(e)
-                        st.session_state.messages.append(
-                            {
-                                "role": "assistant",
-                                "content": f"❌ Lo siento, ocurrió un error: {str(e)[:200]}",
-                            }
-                        )
-
-        st.session_state.procesando = False
-        st.rerun()
+                # Si el mensaje no coincide, resetear
+                st.session_state.procesando = False
+                st.rerun()
 
     # Footer ajustado
     st.markdown(
         f"""
         <div class="fixed-footer">
             <strong>CC-SA</strong> Prof. Raymond Rosa Ávila • AguweyBot con OpenRouter •
-            <span data-tooltip="Versión con barra inferior mejorada">🚀 v10.2</span>
+            <span data-tooltip="Versión con barra inferior mejorada y sin ciclos">🚀 v11.0</span>
             <span style="margin-left: 20px; color: {Config.PRIMARY_COLOR}; font-size: 0.85rem;">
                 ⬇️ Barra de escritura abajo
             </span>
