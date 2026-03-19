@@ -1,14 +1,46 @@
-# requirements.txt
+# ============================================
+# DEPENDENCIAS PARA AGUWEYBOT CON QWEN2.5
+# ============================================
+
+# Framework principal
 streamlit==1.28.1
+
+# OpenAI API (para Qwen2.5)
 openai==1.6.1
+
+# LangChain (para manejo de mensajes)
 langchain-core==0.1.12
+
+# Procesamiento de PDFs
 PyPDF2==3.0.1
+
+# Procesamiento de Word
 python-docx==0.8.11
+
+# Procesamiento de Excel/CSV
 pandas==2.1.3
-openpyxl==3.1.2
-xlrd==2.0.1
+openpyxl==3.1.2  # Necesario para archivos .xlsx
+xlrd==2.0.1      # Necesario para archivos .xls antiguos
+
+# Detección de codificación para archivos de texto
 chardet==5.2.0
+
+# Procesamiento de imágenes
 Pillow==10.1.0
+
+# Texto a voz
 gTTS==2.3.2
+
+# Utilidades adicionales
 requests==2.31.0
-numpy==1.24.3
+numpy==1.24.3     # Dependencia de pandas
+
+# ============================================
+# NOTAS DE INSTALACIÓN
+# ============================================
+# Para instalar todas las dependencias:
+# pip install -r requirements.txt
+#
+# Si encuentras problemas con alguna versión específica,
+# puedes usar versiones más recientes, pero estas han sido
+# probadas y funcionan correctamente.

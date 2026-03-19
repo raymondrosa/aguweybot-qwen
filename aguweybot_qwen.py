@@ -1,5 +1,5 @@
 # ============================================
-# AGUWEYBOT - VERSIÓN PARA OPENROUTER
+# AGUWEYBOT - VERSIÓN CON OPENROUTER - CORREGIDO Y ROBUSTECIDO
 # ============================================
 
 import os
@@ -17,6 +17,7 @@ from datetime import datetime
 from dataclasses import dataclass
 
 from openai import OpenAI
+from openai import APIError, APIConnectionError, RateLimitError
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 
 # Para documentos
@@ -50,14 +51,14 @@ except ImportError:
 # CONFIGURACIÓN INICIAL DE STREAMLIT
 # ============================================
 st.set_page_config(
-    page_title="AguweyBot - Qwen2.5 (OpenRouter)",
+    page_title="AguweyBot - OpenRouter",
     page_icon="🎨",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
 # ============================================
-# CONSTANTES Y CONFIGURACIÓN PARA OPENROUTER
+# CONSTANTES Y CONFIGURACIÓN VISUAL
 # ============================================
 class Config:
     # Colores
@@ -76,25 +77,15 @@ class Config:
     MAX_IMAGE_SIZE_MB = 5
     MAX_DOCUMENT_CHARS = 50000
     
-    # Configuración para OpenRouter
-    OPENROUTER_API_BASE = "https://openrouter.ai/api/v1"
-    OPENROUTER_MODEL = "qwen/qwen-2.5-72b-instruct"  # Modelo de Qwen en OpenRouter
-    
-    # Alternativas de modelos Qwen en OpenRouter:
-    # - "qwen/qwen-2.5-72b-instruct" (recomendado)
-    # - "qwen/qwen-2.5-32b-instruct"
-    # - "qwen/qwen-2.5-14b-instruct"
-    # - "qwen/qwen-2.5-7b-instruct"
-    
+    # Configuración OpenRouter
+    OPENROUTER_MODEL = "qwen/qwen-2.5-72b-instruct"  # Modelo específico de OpenRouter
+    OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
     MAX_TOKENS = 4096
     TEMPERATURE = 0.2
-    
-    # Información de tu sitio (requerido por OpenRouter)
-    SITE_URL = "https://aguweybot.streamlit.app"  # Cambia por tu URL
-    SITE_NAME = "AguweyBot"
+    TIMEOUT = 60.0
 
 # ============================================
-# SYSTEM PROMPT (igual)
+# SYSTEM PROMPT
 # ============================================
 SYSTEM_PROMPT = """
 Eres AguweyBot, un asistente híbrido experto en:
@@ -130,46 +121,22 @@ FORMATO DE RESPUESTA:
 """
 
 # ============================================
-# VERIFICAR API KEY DE OPENROUTER
+# VERIFICAR API KEYS
 # ============================================
 if "OPENROUTER_API_KEY" not in st.secrets:
     st.error("❌ No se encontró la API Key de OpenRouter")
     st.info("""
     Por favor, agrega tu OPENROUTER_API_KEY en Settings → Secrets
     
-    Formato: OPENROUTER_API_KEY = "sk-or-v1-tu-api-key-aqui"
+    Formato:
+    OPENROUTER_API_KEY = "sk-or-v1-..."
     
     Puedes obtener tu API key en: https://openrouter.ai/keys
     """)
     st.stop()
 
 # ============================================
-# INICIALIZAR CLIENTE PARA OPENROUTER
-# ============================================
-@st.cache_resource
-def get_openrouter_client():
-    """Inicializa el cliente de OpenAI compatible con OpenRouter"""
-    try:
-        # Configuración específica para OpenRouter
-        client = OpenAI(
-            api_key=st.secrets["OPENROUTER_API_KEY"],
-            base_url=Config.OPENROUTER_API_BASE,
-            default_headers={
-                "HTTP-Referer": Config.SITE_URL,  # Requerido por OpenRouter
-                "X-Title": Config.SITE_NAME,      # Opcional pero recomendado
-            }
-        )
-        return client
-    except Exception as e:
-        st.error(f"Error al inicializar cliente OpenRouter: {str(e)}")
-        # Fallback sin headers
-        return OpenAI(
-            api_key=st.secrets["OPENROUTER_API_KEY"],
-            base_url=Config.OPENROUTER_API_BASE
-        )
-
-# ============================================
-# FUNCIÓN PARA FONDO Y ESTILOS (igual)
+# FUNCIÓN PARA FONDO
 # ============================================
 def set_background():
     """Aplica la imagen de fondo si existe"""
@@ -221,6 +188,9 @@ def set_background():
         </style>
         """, unsafe_allow_html=True)
 
+# ============================================
+# ESTILOS CSS
+# ============================================
 def aplicar_estilos():
     st.markdown(f"""
     <style>
@@ -399,7 +369,36 @@ def aplicar_estilos():
     """, unsafe_allow_html=True)
 
 # ============================================
-# FUNCIÓN PARA DETECTAR SOLICITUD DE IMAGEN (igual)
+# INICIALIZAR CLIENTE OPENROUTER
+# ============================================
+@st.cache_resource
+def get_openrouter_client():
+    """Inicializa y cachea el cliente de OpenRouter"""
+    try:
+        client = OpenAI(
+            api_key=st.secrets["OPENROUTER_API_KEY"],
+            base_url=Config.OPENROUTER_BASE_URL,
+            max_retries=3,
+            timeout=Config.TIMEOUT,
+            default_headers={
+                "HTTP-Referer": "https://aguweybot.streamlit.app",  # Reemplaza con tu URL
+                "X-Title": "AguweyBot"
+            }
+        )
+        return client
+    except Exception as e:
+        st.error(f"Error al inicializar cliente OpenRouter: {str(e)}")
+        return OpenAI(
+            api_key=st.secrets["OPENROUTER_API_KEY"],
+            base_url=Config.OPENROUTER_BASE_URL,
+            default_headers={
+                "HTTP-Referer": "https://aguweybot.streamlit.app",
+                "X-Title": "AguweyBot"
+            }
+        )
+
+# ============================================
+# FUNCIÓN PARA DETECTAR SOLICITUD DE IMAGEN
 # ============================================
 def detectar_solicitud_imagen(texto: str) -> Optional[str]:
     """Detecta si el usuario pide generar una imagen y extrae la descripción"""
@@ -440,7 +439,7 @@ def detectar_solicitud_imagen(texto: str) -> Optional[str]:
     return None
 
 # ============================================
-# GENERADOR LOCAL MEJORADO (igual)
+# GENERADOR LOCAL MEJORADO
 # ============================================
 def generar_imagen_local(descripcion: str) -> Tuple[Optional[bytes], Optional[str]]:
     """Generador local que SIEMPRE funciona"""
@@ -540,7 +539,7 @@ def generar_imagen_local(descripcion: str) -> Tuple[Optional[bytes], Optional[st
             return None, "Error crítico generando imagen"
 
 # ============================================
-# FUNCIÓN PRINCIPAL DE GENERACIÓN (igual)
+# FUNCIÓN PRINCIPAL DE GENERACIÓN
 # ============================================
 def generar_imagen(descripcion: str) -> Tuple[Optional[bytes], Optional[str]]:
     """Genera una imagen usando el generador local"""
@@ -553,7 +552,7 @@ def generar_imagen(descripcion: str) -> Tuple[Optional[bytes], Optional[str]]:
     return generar_imagen_local(descripcion)
 
 # ============================================
-# FUNCIÓN PARA BOTÓN DE COPIAR (igual)
+# FUNCIÓN PARA BOTÓN DE COPIAR
 # ============================================
 def boton_copiar(texto: str, id_unico: str) -> None:
     """Genera un botón de copiado usando JavaScript"""
@@ -617,7 +616,7 @@ def boton_copiar(texto: str, id_unico: str) -> None:
     components.html(html_code, height=40)
 
 # ============================================
-# CLASE PARA DATOS DEL ARCHIVO (igual)
+# CLASE PARA DATOS DEL ARCHIVO
 # ============================================
 @dataclass
 class DatosArchivo:
@@ -650,7 +649,7 @@ class DatosArchivo:
         return base
 
 # ============================================
-# FUNCIÓN PARA LEER ARCHIVOS (igual)
+# FUNCIÓN PARA LEER ARCHIVOS
 # ============================================
 def leer_archivo_completo(uploaded_file):
     """Lee el archivo con un límite de caracteres"""
@@ -801,7 +800,7 @@ def leer_archivo_completo(uploaded_file):
         return None, f"Error inesperado: {str(e)}"
 
 # ============================================
-# CALLBACK PARA STREAMING (igual)
+# CALLBACK PARA STREAMING
 # ============================================
 class StreamlitCallbackHandler:
     def __init__(self, container):
@@ -832,15 +831,12 @@ class StreamlitCallbackHandler:
             print(f"Error actualizando display: {e}")
 
 # ============================================
-# FUNCIÓN PARA LLAMAR A QWEN EN OPENROUTER
+# FUNCIÓN PARA LLAMAR A OPENROUTER
 # ============================================
-def llamar_qwen_openrouter(mensajes, callback=None):
-    """Llama al modelo Qwen2.5 a través de OpenRouter"""
+def llamar_openrouter(mensajes, callback=None):
+    """Llama al modelo de OpenRouter con manejo de errores"""
     try:
         client = get_openrouter_client()
-        
-        if client is None:
-            raise Exception("No se pudo inicializar el cliente de OpenRouter")
 
         openai_messages = []
         for msg in mensajes:
@@ -851,16 +847,21 @@ def llamar_qwen_openrouter(mensajes, callback=None):
             elif isinstance(msg, AIMessage):
                 openai_messages.append({"role": "assistant", "content": msg.content})
 
-        # Parámetros para OpenRouter
         kwargs = {
             "model": Config.OPENROUTER_MODEL,
             "messages": openai_messages,
             "temperature": Config.TEMPERATURE,
-            "max_tokens": Config.MAX_TOKENS
+            "max_tokens": Config.MAX_TOKENS,
+            "timeout": Config.TIMEOUT
+        }
+
+        # Añadir headers específicos de OpenRouter (opcional)
+        kwargs["extra_headers"] = {
+            "HTTP-Referer": "https://aguweybot.streamlit.app",
+            "X-Title": "AguweyBot"
         }
 
         if callback:
-            # Streaming
             kwargs["stream"] = True
             response_text = ""
             try:
@@ -875,24 +876,32 @@ def llamar_qwen_openrouter(mensajes, callback=None):
                 callback.on_end()
                 return response_text
             except Exception as e:
-                print(f"Error en streaming con OpenRouter: {e}")
-                # Fallback a sin streaming
+                print(f"Error en streaming: {e}")
                 kwargs.pop("stream", None)
                 response = client.chat.completions.create(**kwargs)
                 return response.choices[0].message.content
         else:
-            # Sin streaming
             response = client.chat.completions.create(**kwargs)
             return response.choices[0].message.content
 
+    except RateLimitError as e:
+        error_msg = "⏳ Límite de tasa de la API excedido. Por favor, espera un momento."
+        st.error(error_msg)
+        raise Exception(error_msg) from e
+    except APIConnectionError as e:
+        error_msg = "🔌 Error de conexión con la API. Verifica tu internet."
+        st.error(error_msg)
+        raise Exception(error_msg) from e
+    except APIError as e:
+        error_msg = f"⚠️ Error de la API: {e.message}"
+        st.error(error_msg)
+        raise Exception(error_msg) from e
     except Exception as e:
-        print(f"Error completo en OpenRouter: {e}")
-        import traceback
-        traceback.print_exc()
-        raise Exception(f"Error en OpenRouter: {str(e)}")
+        print(f"Error inesperado: {e}")
+        raise e
 
 # ============================================
-# TEXTO A VOZ (igual)
+# TEXTO A VOZ
 # ============================================
 def texto_a_audio_unico(texto: str) -> Optional[bytes]:
     """Convierte texto a audio"""
@@ -920,7 +929,7 @@ def texto_a_audio_unico(texto: str) -> Optional[bytes]:
         return None
 
 # ============================================
-# FUNCIÓN PARA MOSTRAR LOGO (igual)
+# FUNCIÓN PARA MOSTRAR LOGO
 # ============================================
 def mostrar_logo():
     if os.path.exists(Config.LOGO_PATH):
@@ -933,7 +942,7 @@ def mostrar_logo():
     else:
         st.sidebar.markdown("""
         # 🤖 AguweyBot
-        ### *Con Qwen2.5 vía OpenRouter*
+        ### *Con OpenRouter y generación local de imágenes*
         """)
 
 def mostrar_info_archivo(datos: DatosArchivo) -> None:
@@ -956,10 +965,10 @@ def mostrar_info_archivo(datos: DatosArchivo) -> None:
                     st.text(datos.contenido_completo[:500] + "...")
 
 # ============================================
-# FUNCIÓN PRINCIPAL (modificada para OpenRouter)
+# FUNCIÓN PRINCIPAL
 # ============================================
 def main():
-    """Función principal de la aplicación - Versión OpenRouter"""
+    """Función principal de la aplicación"""
     
     set_background()
     aplicar_estilos()
@@ -986,18 +995,10 @@ def main():
         st.markdown("---")
         
         st.markdown("### 🔑 Estado")
-        # Verificar que la API key existe (ya se verificó al inicio)
         st.success("✅ OpenRouter conectado")
         st.success("🎨 Generador local activo (100% funcional)")
         
         st.info(f"🤖 Modelo: {Config.OPENROUTER_MODEL}")
-        
-        # Mostrar créditos de OpenRouter (opcional)
-        try:
-            client = get_openrouter_client()
-            # Nota: OpenRouter no tiene endpoint de créditos simple, pero se podría agregar
-        except:
-            pass
         
         if TTS_AVAILABLE:
             st.success("✅ Audio disponible")
@@ -1082,8 +1083,8 @@ def main():
             """)
     
     # Contenido principal
-    st.markdown("<h1>🎨 AguweyBot con Qwen2.5 (OpenRouter)</h1>", unsafe_allow_html=True)
-    st.markdown('<p class="subtitle">Asistente inteligente vía OpenRouter con generación local de imágenes</p>', unsafe_allow_html=True)
+    st.markdown("<h1>🎨 AguweyBot con OpenRouter</h1>", unsafe_allow_html=True)
+    st.markdown('<p class="subtitle">Asistente inteligente con análisis de documentos y generación local de imágenes</p>', unsafe_allow_html=True)
     
     # Mostrar historial
     for i, msg in enumerate(st.session_state.messages):
@@ -1145,9 +1146,9 @@ def main():
     # Mensaje de bienvenida
     if st.session_state.primer_mensaje and not st.session_state.messages:
         st.info("""
-        👋 **¡Bienvenido a AguweyBot con Qwen2.5 vía OpenRouter!**
+        👋 **¡Bienvenido a AguweyBot con OpenRouter!**
         
-        **🤖 Modelo:** Qwen2.5-72B-Instruct (OpenRouter)
+        **🤖 Modelo:** Qwen2.5-72B-Instruct vía OpenRouter
         
         **🎨 Características:**
         - 📄 **Análisis de documentos** (PDF, Excel, CSV, TXT, DOCX)
@@ -1244,8 +1245,7 @@ def main():
                         else:
                             mensajes.append(HumanMessage(content=last_user_message))
                         
-                        # Usar la función específica para OpenRouter
-                        response_content = llamar_qwen_openrouter(mensajes, callback)
+                        response_content = llamar_openrouter(mensajes, callback)
                         
                         container.markdown(f'<div class="respuesta-aguwey">{response_content}</div>', unsafe_allow_html=True)
                         
@@ -1258,7 +1258,7 @@ def main():
                                 st.session_state.audio_actual_idx = len(st.session_state.messages) - 1
                                 
                     except Exception as e:
-                        st.error(f"❌ Error al obtener respuesta de OpenRouter: {str(e)}")
+                        st.error(f"❌ Error al obtener respuesta: {str(e)}")
                         st.exception(e)
                         st.session_state.messages.append({
                             "role": "assistant",
@@ -1272,8 +1272,8 @@ def main():
     st.markdown(
         f"""
         <div class="fixed-footer">
-            <strong>CC-SA</strong> Prof. Raymond Rosa Ávila • AguweyBot con Qwen2.5 (OpenRouter) •
-            <span data-tooltip="Versión para OpenRouter">🚀 v10.0</span>
+            <strong>CC-SA</strong> Prof. Raymond Rosa Ávila • AguweyBot con OpenRouter •
+            <span data-tooltip="Versión con OpenRouter y generador local">🚀 v10.0</span>
         </div>
         """,
         unsafe_allow_html=True
