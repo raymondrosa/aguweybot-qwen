@@ -78,7 +78,7 @@ class Config:
     MAX_DOCUMENT_CHARS = 50000
     
     # Configuración OpenRouter
-    OPENROUTER_MODEL = "qwen/qwen-2.5-72b-instruct"  # Modelo específico de OpenRouter
+    OPENROUTER_MODEL = "qwen/qwen-2.5-7b-instruct"  # Modelo específico de OpenRouter
     OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
     MAX_TOKENS = 4096
     TEMPERATURE = 0.2
@@ -961,9 +961,15 @@ def mostrar_info_archivo(datos: DatosArchivo) -> None:
             if datos.tipo in ["excel", "csv"] and datos.dataframe is not None:
                 st.dataframe(datos.dataframe.head(5), use_container_width=True)
             elif datos.num_caracteres > 500:
-                with st.expander("📄 Vista previa"):
-                    st.text(datos.contenido_completo[:500] + "...")
-
+                # CORREGIDO: Cambiado expander por text_area
+                st.markdown("**📄 Vista previa:**")
+                st.text_area(
+                    label="Contenido del archivo",
+                    value=datos.contenido_completo[:500] + "...",
+                    height=150,
+                    disabled=True,
+                    label_visibility="collapsed"
+                )
 # ============================================
 # FUNCIÓN PRINCIPAL
 # ============================================
