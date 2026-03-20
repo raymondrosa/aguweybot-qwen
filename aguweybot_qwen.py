@@ -196,6 +196,7 @@ def set_background():
             unsafe_allow_html=True
         )
 
+
 # ============================================
 # ESTILOS CSS CORREGIDOS - BARRA DE ESCRITURA INFERIOR
 # ============================================
@@ -206,18 +207,66 @@ def aplicar_estilos():
         /* Estilos generales */
         .stApp {{
             background-color: {Config.BACKGROUND_DARK};
-        }}
+        
 
         /* Contenedor principal ajustado */
     .main .block-container {{
     backdrop-filter: blur(10px);
     border-radius: 20px;
-    padding-bottom: 2rem !important; /* Reducido de 100px a 2rem */
+    padding-bottom: 6rem !important;
     margin: 1rem auto !important;
     border: 1px solid {Config.PRIMARY_COLOR};
-    
     max-width: 1000px !important;
 }}
+/* 1. Elimina el recuadro blanco y el degradado de fondo del contenedor de input */
+[data-testid="stChatInput"] {{
+    background-color: transparent !important;
+    bottom: 20px !important; /* Ajusta la distancia del borde inferior */
+}}
+
+/* 2. Elimina el fondo del área que envuelve la barra (el culpable del recuadro blanco) */
+.stChatInputContainer {{
+    background-color: rgba(10, 12, 16, 0.9) !important; /* Fondo oscuro sólido o traslúcido */
+    border: 2px solid {Config.PRIMARY_COLOR} !important;
+    border-radius: 12px !important;
+    margin-bottom: 10px !important;
+}}
+
+/* 3. Ajusta el espaciado del cuerpo de la página para que el último mensaje no quede tapado */
+.main .block-container {{
+    padding-bottom: 150px !important; 
+}}
+
+/* 4. Oculta el gradiente decorativo que Streamlit pone a veces al fondo */
+[data-testid="stVerticalBlock"] > div:last-child {{
+    background: none !important;
+}}
+/* 1. Elimina el fondo blanco del contenedor externo del input */
+[data-testid="stChatInput"] {{
+    background-color: transparent !important;
+}}
+
+/* 2. Estiliza el contenedor real de la barra */
+.stChatInputContainer {{
+    background-color: rgba(26, 32, 44, 0.8) !important; /* Fondo oscuro traslúcido */
+    border: 1px solid {Config.PRIMARY_COLOR} !important; /* Borde neón fino */
+    border-radius: 15px !important;
+    box-shadow: 0 0 10px rgba(0, 255, 255, 0.1) !important;
+}}
+
+/* 3. Asegura que el área de texto no tenga fondos residuales */
+.stChatInputContainer textarea {{
+    background-color: transparent !important;
+    color: white !important;
+}}
+
+/* 4. Opcional: Elimina el borde de enfoque predeterminado de Streamlit */
+.stChatInputContainer:focus-within {{
+    border-color: {Config.SECONDARY_COLOR} !important;
+    box-shadow: 0 0 20px rgba(0, 255, 255, 0.3) !important;
+}}
+
+
 
         /* Títulos */
         h1 {{
@@ -344,58 +393,58 @@ def aplicar_estilos():
             font-style: italic;
         }}
 
+/* Elimina el degradado que Streamlit pone al final de la página */
+[data-testid="stVerticalBlock"] > div:last-child {{
+    background: none !important;
+}}
+
         /* ===== BARRA DE ESCRITURA DESPUÉS DE LAS RESPUESTAS ===== */
+/* ===== BARRA DE ESCRITURA MEJORADA (ESTILO NEÓN) ===== */
+div[data-testid="stChatInput"] {{
+    padding: 1rem 0 !important;
+}}
+
 .stChatInputContainer {{
-   border: 3px solid #00ffff !important;
-    border-radius: 12px !important;
-    background: rgba(10,12,16,0.9) !important;
-    }}
+    border: 2px solid {Config.PRIMARY_COLOR} !important;
+    border-radius: 15px !important;
+    background: rgba(15, 20, 28, 0.95) !important;
+    box-shadow: 0 0 15px rgba(0, 255, 255, 0.2) !important;
+    transition: all 0.3s ease !important;
+    backdrop-filter: blur(10px);
+}}
 
-        .stChatInputContainer:hover {{
-            box-shadow: 0 15px 50px rgba(0, 0, 0, 0.6), 0 0 30px rgba(0, 255, 255, 0.3) !important;
-            border-color: {Config.SECONDARY_COLOR} !important;
-            
-        }}
+.stChatInputContainer:focus-within {{
+    box-shadow: 0 0 25px rgba(0, 255, 255, 0.5) !important;
+    border-color: {Config.SECONDARY_COLOR} !important;
+    transform: translateY(-2px);
+}}
 
-        .stChatInputContainer textarea {{
-            
-            color: white !important;
-            border: none !important;
-            font-size: 1rem !important;
-            padding: 12px 0 !important;
-            min-height: 5px !important;
-            max-height: 100px !important;
-            resize: vertical !important;
-            background-color: transparent !important;
-            box-shadow: none !important;
-            border: none !important;
-            outline: none !important;
-        }}
+/* Área de texto interna */
+.stChatInputContainer textarea {{
+    color: #ffffff !important;
+    font-size: 1.05rem !important;
+    caret-color: {Config.PRIMARY_COLOR} !important;
+}}
 
-        .stChatInputContainer textarea::placeholder {{
-            color: rgba(0, 255, 255, 0.6) !important;
-            font-style: italic;
-        }}
+/* Botón de enviar (Icono de flecha) */
+.stChatInputContainer button {{
+    background-color: {Config.PRIMARY_COLOR} !important;
+    color: #000000 !important;
+    border-radius: 10px !important;
+    padding: 5px !important;
+    transition: transform 0.2s !important;
+}}
 
-        .stChatInputContainer button {{
-            background: linear-gradient(145deg, {Config.SECONDARY_COLOR}, {Config.PRIMARY_COLOR}) !important;
-            color: #000 !important;
-            font-weight: bold !important;
-            border: none !important;
-            border-radius: 50px !important;
-            padding: 0.5rem 1.5rem !important;
-            margin: 5px !important;
-            transition: all 0.2s !important;
-            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3) !important;
-        }}
+.stChatInputContainer button:hover {{
+    transform: scale(1.1) rotate(-5deg) !important;
+    background-color: {Config.SECONDARY_COLOR} !important;
+}}
 
-        .stChatInputContainer button:hover {{
-            transform: scale(1.05) !important;
-           box-shadow: 0 6px 20px rgba(0, 255, 255, 0.3) !important;
-        }}
-
-
-        
+/* Placeholder personalizado */
+.stChatInputContainer textarea::placeholder {{
+    color: rgba(0, 255, 255, 0.4) !important;
+    font-style: italic;
+}}        
         .imagen-generada {{
             background: linear-gradient(145deg, {Config.CARD_BACKGROUND}, #15232e);
             border-radius: 16px;
