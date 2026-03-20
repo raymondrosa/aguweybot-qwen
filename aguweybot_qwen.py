@@ -347,30 +347,19 @@ def aplicar_estilos():
 
         /* ===== BARRA DE ESCRITURA DESPUÉS DE LAS RESPUESTAS ===== */
 .stChatInputContainer {{
-    position: relative !important; /* Cambiado de fixed a relative */
-    bottom: 0 !important;
-    left: 0 !important;
-    transform: none !important;
-    width: 100% !important; /* Ocupa el ancho del contenedor */
-    max-width: 100% !important;
-    z-index: 1000 !important;
-    background: rgba(10, 12, 16, 0.95) !important;
-    backdrop-filter: blur(12px) !important;
-    border: 2px solid {Config.PRIMARY_COLOR} !important;
-    border-radius: 15px !important; /* Ajustado para que no sea tan ovalado */
-    padding: 5px !important;
-    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5) !important;
-    margin-top: 20px !important; /* Espacio respecto a la última respuesta */
-}}
+   border: 2px solid #00ffff !important;
+    border-radius: 12px !important;
+    background: rgba(10,12,16,0.9) !important;
+    }}
 
         .stChatInputContainer:hover {{
             box-shadow: 0 15px 50px rgba(0, 0, 0, 0.6), 0 0 30px rgba(0, 255, 255, 0.3) !important;
             border-color: {Config.SECONDARY_COLOR} !important;
-            transform: translateX(-50%) translateY(-2px) !important;
+            
         }}
 
         .stChatInputContainer textarea {{
-            background: transparent !important;
+            
             color: white !important;
             border: none !important;
             font-size: 1rem !important;
@@ -378,6 +367,10 @@ def aplicar_estilos():
             min-height: 50px !important;
             max-height: 150px !important;
             resize: vertical !important;
+            background-color: transparent !important;
+            box-shadow: none !important;
+            border: none !important;
+            outline: none !important;
         }}
 
         .stChatInputContainer textarea::placeholder {{
@@ -401,6 +394,7 @@ def aplicar_estilos():
             transform: scale(1.05) !important;
             box-shadow: 0 6px 20px rgba(0, 255, 255, 0.3) !important;
         }}
+
 
         
 
