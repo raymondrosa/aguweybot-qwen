@@ -209,14 +209,13 @@ def aplicar_estilos():
         }}
 
         /* Contenedor principal ajustado */
-.main .block-container {{
-    background-color: rgba(10, 12, 16, 0.85);
+    .main .block-container {{
     backdrop-filter: blur(10px);
     border-radius: 20px;
     padding-bottom: 2rem !important; /* Reducido de 100px a 2rem */
     margin: 1rem auto !important;
     border: 1px solid {Config.PRIMARY_COLOR};
-    box-shadow: 0 0 30px rgba(0, 255, 255, 0.2);
+    
     max-width: 1000px !important;
 }}
 
@@ -347,7 +346,7 @@ def aplicar_estilos():
 
         /* ===== BARRA DE ESCRITURA DESPUÉS DE LAS RESPUESTAS ===== */
 .stChatInputContainer {{
-   border: 2px solid #00ffff !important;
+   border: 3px solid #00ffff !important;
     border-radius: 12px !important;
     background: rgba(10,12,16,0.9) !important;
     }}
@@ -364,8 +363,8 @@ def aplicar_estilos():
             border: none !important;
             font-size: 1rem !important;
             padding: 12px 0 !important;
-            min-height: 50px !important;
-            max-height: 150px !important;
+            min-height: 5px !important;
+            max-height: 100px !important;
             resize: vertical !important;
             background-color: transparent !important;
             box-shadow: none !important;
@@ -392,12 +391,11 @@ def aplicar_estilos():
 
         .stChatInputContainer button:hover {{
             transform: scale(1.05) !important;
-            box-shadow: 0 6px 20px rgba(0, 255, 255, 0.3) !important;
+           box-shadow: 0 6px 20px rgba(0, 255, 255, 0.3) !important;
         }}
 
 
         
-
         .imagen-generada {{
             background: linear-gradient(145deg, {Config.CARD_BACKGROUND}, #15232e);
             border-radius: 16px;
